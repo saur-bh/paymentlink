@@ -108,14 +108,58 @@
         document.querySelectorAll('.gen-link-btn').forEach(btn => {
           btn.addEventListener('click', function() {
             const invoice = JSON.parse(decodeURIComponent(this.getAttribute('data-invoice')));
-            let phone = invoice.child?.phone || '';
-            phone = prompt('Edit phone number before generating link:', phone);
-            if (phone === null) return; // Cancelled
-            invoice.child = invoice.child || {};
-            invoice.child.phone = phone;
-            window.generateLink(invoice);
+            showPhoneEditDialog(invoice);
           });
         });
+    // Show a dialog to edit phone number before generating link
+    function showPhoneEditDialog(invoice) {
+      let modal = document.createElement('div');
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100vw';
+      modal.style.height = '100vh';
+      modal.style.background = 'rgba(0,0,0,0.4)';
+      modal.style.display = 'flex';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.zIndex = '9999';
+
+      let box = document.createElement('div');
+      box.style.background = '#fff';
+      box.style.padding = '2em';
+      box.style.borderRadius = '8px';
+      box.style.boxShadow = '0 2px 12px #0002';
+      box.style.textAlign = 'center';
+      box.innerHTML = `<h2>Edit Phone Number</h2><input id="edit-phone-input" style="width:90%;font-size:1.2em;padding:0.5em;" value="${invoice.child?.phone || ''}" maxlength="10" pattern="[0-9]{10}"><br><br>`;
+
+      let okBtn = document.createElement('button');
+      okBtn.textContent = 'Generate Link';
+      okBtn.onclick = function() {
+        const phone = document.getElementById('edit-phone-input').value.trim();
+        if (!/^\d{10}$/.test(phone)) {
+          alert('Please enter a valid 10-digit phone number.');
+          return;
+        }
+        invoice.child = invoice.child || {};
+        invoice.child.phone = phone;
+        document.body.removeChild(modal);
+        window.generateLink(invoice);
+      };
+
+      let cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.marginLeft = '1em';
+      cancelBtn.onclick = function() {
+        document.body.removeChild(modal);
+      };
+
+      box.appendChild(okBtn);
+      box.appendChild(cancelBtn);
+      modal.appendChild(box);
+      document.body.appendChild(modal);
+      document.getElementById('edit-phone-input').focus();
+    }
     window.generateLink = async function(invoice) {
       try {
         const response = await fetch('/generate-link', {
@@ -125,13 +169,32 @@
         });
         const result = await response.json();
         if (result.link) {
-          // Show a modal-like div with the link and copy button
           showLinkModal(result.link);
         } else {
-          let msg = 'Failed to generate link.';
-          if (result.raw && result.raw.message) msg += '\n' + result.raw.message;
-          alert(msg);
+          let msg = '❌ Failed to generate link.';
+          if (result.error) msg += '<br>' + result.error;
+          else if (result.raw && result.raw.message) msg += '<br>' + result.raw.message;
+          showErrorOnPage(msg);
         }
+    // Show error message on the page (above the table)
+    function showErrorOnPage(msg) {
+      let errDiv = document.getElementById('link-error-msg');
+      if (!errDiv) {
+        errDiv = document.createElement('div');
+        errDiv.id = 'link-error-msg';
+        errDiv.style.background = '#ffe0e0';
+        errDiv.style.color = '#a00';
+        errDiv.style.padding = '1em';
+        errDiv.style.margin = '1em 0';
+        errDiv.style.border = '1px solid #f99';
+        errDiv.style.borderRadius = '6px';
+        errDiv.style.fontWeight = 'bold';
+        errDiv.style.textAlign = 'center';
+        document.body.insertBefore(errDiv, document.getElementById('table'));
+      }
+      errDiv.innerHTML = msg;
+      setTimeout(() => { if (errDiv) errDiv.innerHTML = ''; }, 8000);
+    }
     // Modal for showing/copying the payment link
     function showLinkModal(link) {
       let modal = document.createElement('div');
