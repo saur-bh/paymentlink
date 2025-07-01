@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Kidaura Invoice Driver</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    button, input, select { font-size: 1em; margin: 0.2em; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; }
+    th { background: #f0f0f0; }
+    #status { margin: 1em 0; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>📄 Kidaura Invoice Fetcher</h1>
+  <form id="monthForm" onsubmit="fetchInvoices(); return false;">
+    <label>Year: <input type="number" id="year" min="2000" max="2100" value="2025"></label>
+    <label>Month: <input type="number" id="month" min="1" max="12" value="7"></label>
+    <label>Centre:
+      <select id="centre">
+        <option value="gkp">Gorakhpur</option>
+        <option value="lko">Lucknow</option>
+      </select>
+    </label>
+    <button type="submit">Fetch Invoices</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="table"></div>
+  <button onclick="saveDrafts()">💾 Save Drafts</button>
+
+  <script>
+    let lastInvoices = [];
+
+    async function fetchInvoices() {
+      const year = document.getElementById('year').value;
+      const month = String(document.getElementById('month').value).padStart(2, '0');
+      const centre = document.getElementById('centre').value;
+
+      const start = `${year}-${month}-01T00:00:00.000Z`;
+      const end = month < 12
+        ? `${year}-${String(Number(month)+1).padStart(2, '0')}-01T00:00:00.000Z`
+        : `${Number(year)+1}-01-01T00:00:00.000Z`;
+
+      document.getElementById('status').textContent = '🔄 Loading...';
+      document.getElementById('table').innerHTML = '';
+
+      const query = `
+        query Invoices($startDate: DateTime, $endDate: DateTime) {
+          invoices(startDate: $startDate, endDate: $endDate) {
+            id invoiceNo paymentMode createdAt invoiceStatus total invoiceDate
+            child { fullNameWithCaseId fatherName phone email }
+          }
+        }
+      `;
+
+      const variables = { startDate: start, endDate: end };
+
+     const tokens = {
+        gkp: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2MmNkNDUzNTNlZjhjOGNkNDViMmNjNDUiLCJvcmdhbml6YXRpb24iOnsiX2lkIjoiNjQ3OTg2YTAwMzY5ZWIyYWY2NGJhNDA1IiwibmFtZSI6IkFhcnlhdmFydCBDZW50cmUgLUdvcmFraFB1ciJ9LCJpYXQiOjE3NTA4NTQyMDIsImV4cCI6MTc2NjQwNjIwMn0.Y_h4TPoVFmrBydu3bTRgDYg1Cwm7VgsJ0vxRGwhISQs',
+        lko: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2MmNkNDUzNTNlZjhjOGNkNDViMmNjNDUiLCJvcmdhbml6YXRpb24iOnsiX2lkIjoiNjJjZDQ1ODczZWY4YzhjZDQ1YjJjYzUyIiwibmFtZSI6ImFhcnlhdmFydCBDZW50ZXIgRm9yIEF1dGlzbSBBbmQgU3BlY2lhbCBOZWVkcyBGb3VuZGF0aW9uIn0sImlhdCI6MTc1MTM3NTgyNywiZXhwIjoxNzY2OTI3ODI3fQ.GpKtSO6WxxSHnHyvWCZnxy3edA1Yo7jFFhVV9zMCanM'
+      };
+
+      const token = tokens[centre];
+
+      try {
+        const resp = await fetch('https://care.kidaura.in/api/graphql', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ query, variables })
+        });
+
+        const data = await resp.json();
+        const invoices = data?.data?.invoices || [];
+        lastInvoices = invoices;
+
+        document.getElementById('status').textContent = `✅ Found ${invoices.length} invoice(s).`;
+
+        if (invoices.length === 0) return;
+
+        let html = `<table><thead><tr>
+          <th>ID</th><th>Invoice No</th><th>Child Name</th><th>Parent Name</th><th>Phone</th>
+          <th>Email</th><th>Status</th><th>Amount</th><th>Date</th>
+        </tr></thead><tbody>`;
+
+        for (const inv of invoices) {
+          html += `<tr>
+            <td>${inv.id}</td>
+            <td>${inv.invoiceNo}</td>
+            <td>${inv.child?.fullNameWithCaseId || ''}</td>
+            <td>${inv.child?.fatherName || ''}</td>
+            <td>${inv.child?.phone || ''}</td>
+            <td>${inv.child?.email || ''}</td>
+            <td>${inv.invoiceStatus || ''}</td>
+            <td>${inv.total}</td>
+            <td>${inv.invoiceDate}</td>
+            <td><button class="gen-link-btn" data-invoice='${encodeURIComponent(JSON.stringify({ ...inv, centre }))}'>Generate Link</button></td>
+          </tr>`;
+        }
+
+        html += '</tbody></table>';
+        document.getElementById('table').innerHTML = html;
+        // Attach event listeners after rendering
+        document.querySelectorAll('.gen-link-btn').forEach(btn => {
+          btn.addEventListener('click', function() {
+            const invoice = JSON.parse(decodeURIComponent(this.getAttribute('data-invoice')));
+            let phone = invoice.child?.phone || '';
+            phone = prompt('Edit phone number before generating link:', phone);
+            if (phone === null) return; // Cancelled
+            invoice.child = invoice.child || {};
+            invoice.child.phone = phone;
+            window.generateLink(invoice);
+          });
+        });
+    window.generateLink = async function(invoice) {
+      try {
+        const response = await fetch('/generate-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoice })
+        });
+        const result = await response.json();
+        if (result.link) {
+          // Show a modal-like div with the link and copy button
+          showLinkModal(result.link);
+        } else {
+          let msg = 'Failed to generate link.';
+          if (result.raw && result.raw.message) msg += '\n' + result.raw.message;
+          alert(msg);
+        }
+    // Modal for showing/copying the payment link
+    function showLinkModal(link) {
+      let modal = document.createElement('div');
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100vw';
+      modal.style.height = '100vh';
+      modal.style.background = 'rgba(0,0,0,0.4)';
+      modal.style.display = 'flex';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.zIndex = '9999';
+
+      let box = document.createElement('div');
+      box.style.background = '#fff';
+      box.style.padding = '2em';
+      box.style.borderRadius = '8px';
+      box.style.boxShadow = '0 2px 12px #0002';
+      box.style.textAlign = 'center';
+      box.innerHTML = `<h2>Payment Link</h2><input id="paylinkinput" style="width:90%" value="${link}" readonly><br><br>`;
+
+      let copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy Link';
+      copyBtn.onclick = function() {
+        const inp = document.getElementById('paylinkinput');
+        inp.select();
+        document.execCommand('copy');
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy Link'; }, 1200);
+      };
+
+      let openBtn = document.createElement('button');
+      openBtn.textContent = 'Open Link';
+      openBtn.style.marginLeft = '1em';
+      openBtn.onclick = function() {
+        window.open(link, '_blank');
+      };
+
+      let closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.marginLeft = '1em';
+      closeBtn.onclick = function() {
+        document.body.removeChild(modal);
+      };
+
+      box.appendChild(copyBtn);
+      box.appendChild(openBtn);
+      box.appendChild(closeBtn);
+      modal.appendChild(box);
+      document.body.appendChild(modal);
+    }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+      } catch (e) {
+        document.getElementById('status').textContent = '❌ Error: ' + e.message;
+      }
+    }
+
+    async function saveDrafts() {
+      const month = document.getElementById('month').value;
+      const year = document.getElementById('year').value;
+      const centre = document.getElementById('centre').value;
+
+      const response = await fetch('/save-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, year, centre, data: lastInvoices })
+      });
+
+      const result = await response.json();
+      alert('✅ Drafts saved to: ' + result.file);
+    }
+  </script>
+</body>
+</html>
